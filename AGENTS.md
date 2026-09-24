@@ -59,7 +59,7 @@ Stack: **TypeScript (ESM, `"type":"module"`)** run via **Node native type-stripp
 * **No type-checking in CI**: `--experimental-strip-types` *strips* types but does **not** type-check. Type errors only surface in the editor — run tests for behavior, but also keep types clean manually.
 * **`SidebarCompositor` (compositor.ts) monkey-patches** `terminal.columns` and `terminal.write`, and wraps `tui.doRender` in a synchronized-output block. Edits here are high-risk (flicker/regressions); it repaints only changed rows to stay flicker-free.
 * **Context bar color** is by window-usage %: green `<50`, yellow (accent) `50–80`, red (error) `>80`. The separate `left ≈Nt` row uses pace-based color (muted/accent/warning).
-* **Reserved panel rows** (stable layout): MCP = header + 2 content, Todos = header + 7 content (`padToMin`). Panels grow past reserved only when content exceeds it; Todos caps at `todosMax` with a ` … +N more` footer.
+* **Reserved panel rows**: Todos = header + 7 content (`padToMin`), grows past reserved only when content exceeds it; caps at `todosMax` with a ` … +N more` footer. MCP is **not** reserved: it renders exactly one row per configured server and is **hidden entirely** (`return []`) when no servers are configured.
 * **Defaults**: sidebar width `45`, `todosMax` `10`. Persisted to `~/.pi/agent/sidebar-tui.json` (corrupt/out-of-range → defaults).
 * **Release workflow**: bump `version` in `package.json` → add a `## [version] - YYYY-MM-DD` section to `CHANGELOG.md` (move `[Unreleased]` content in) → `git commit` + `git push origin main` → `npm publish`. The **lockfile root `version` is intentionally left stale** (repo convention; don't "fix" it).
 * **Publish `files`**: only `*.ts` + `panels/**/*.ts` are shipped (tests excluded).

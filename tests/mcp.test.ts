@@ -173,23 +173,21 @@ test("mcp panel: connected-all server keeps success dot and counts", () => {
   assert.ok(!text.includes("⊘"), `unexpected disabled glyph: ${text}`);
 });
 
-test("mcp panel: empty reserves header + 2 blank rows", () => {
+test("mcp panel: empty hides the whole section", () => {
   const lines = renderMcpPanel(makeMcpCtx([]), 40);
-  assert.equal(lines.length, 4, `expected 4 rows (2 header + 2 blank), got ${lines.length}`);
-  assert.ok(strip(lines[0]!).includes("MCP Servers"), `header missing, got: ${strip(lines[0]!)}`);
-  for (let i = 2; i < 4; i++) {
-    assert.equal(strip(lines[i]!).trim(), "", `row ${i} should be blank, got: "${strip(lines[i]!)}"`);
-  }
+  assert.equal(lines.length, 0, `expected empty array when no servers, got ${lines.length}`);
 });
 
-test("mcp panel: few servers padded to 2 content rows", () => {
+test("mcp panel: single server is header + 1 row (no padding)", () => {
   const lines = renderMcpPanel(makeMcpCtx([
     { name: "srv", directCount: 1, totalCount: 1, tokenEstimate: 50, connected: true, disabled: false },
   ]), 40);
-  assert.equal(lines.length, 4, `expected 4 rows, got ${lines.length}`);
+  assert.equal(lines.length, 3, `expected 3 rows (2 header + 1 server), got ${lines.length}`);
+  assert.ok(strip(lines[0]!).includes("MCP Servers"), `header missing, got: ${strip(lines[0]!)}`);
+  assert.ok(strip(lines[2]!).includes("srv"), `server row missing, got: ${strip(lines[2]!)}`);
 });
 
-test("mcp panel: grows beyond 2 when more servers", () => {
+test("mcp panel: grows with server count", () => {
   const servers = Array.from({ length: 7 }, (_, i) => ({
     name: `srv${i}`, directCount: 1, totalCount: 1, tokenEstimate: 10, connected: true, disabled: false,
   }));

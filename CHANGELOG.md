@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.5] - 2026-09-24
+
+### Changed
+
+- **MCP section hidden when empty**: The MCP Servers section is now hidden entirely when no MCP servers are configured (previously it always rendered its header + reserved blank rows).
+- **MCP spacing fits server count**: The MCP panel no longer pads to a fixed 2 content rows. It renders exactly one row per configured server, so a single server shows only its row plus the separator before Todos instead of an extra blank row.
+
 ## [1.7.4] - 2026-09-16
 
 ### Changed
