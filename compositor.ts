@@ -111,6 +111,15 @@ export class SidebarCompositor {
             value(this: any, data: string) {
               if (typeof data !== "string") return originalWrite.call(this, data);
               if (/\x1b\[(?:2J|3J)/.test(data)) forceFullPaint = true;
+              // An LF emitted at the bottom screen row scrolls the FULL
+              // terminal width, shifting sidebar columns up. The diff cache
+              // models content, not screen state, so any LF invalidates it.
+              // False positives (LF mid-screen) cost one full repaint; false
+              // negatives are the sidebar-wipe bug. Keyed on bare \n (not
+              // \r\n) so a chunk split between \r and \n is still caught.
+              // ponytail: pi-tui never emits RI/SU/IND; if it ever does,
+              // extend this check (regression gate: tests/compositor.test.ts).
+              if (data.indexOf("\n") !== -1) forceFullPaint = true;
               const sanitized = data
                 .replace(/\x1b\[\?2026[hl]/g, "")
                 .replace(/\x1b\[2K/g, `\x1b[${mainWidth}X`);
