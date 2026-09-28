@@ -1,29 +1,23 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { SidebarContext } from "./types.ts";
-import { renderSessionPanel } from "./panels/session.ts";
-import { renderTodosPanel } from "./panels/todos.ts";
-import { renderWorkspacePanel } from "./panels/workspace.ts";
-import { renderMcpPanel } from "./panels/mcp.ts";
+import { createPanelRegistry, type PanelRegistry } from "./registry.ts";
+import { registerBuiltinPanels } from "./builtins.ts";
 
-export function renderSidebar(ctx: SidebarContext, width: number): string[] {
-  const safeWidth = Math.max(1, width);
+/**
+ * Render the sidebar. With a registry (production) it renders every visible
+ * registered panel via `registry.renderAll`; without one it falls back to a
+ * throwaway registry containing only the builtins (legacy/test path).
+ */
+export function renderSidebar(
+  ctx: SidebarContext,
+  width: number,
+  registry?: PanelRegistry,
+): string[] {
+  const reg = registry ?? builtinOnlyRegistry(ctx);
+  return reg.renderAll(Math.max(1, width), reg.getFrame());
+}
 
-  const allPanels = [
-    renderSessionPanel(ctx, safeWidth),
-    renderMcpPanel(ctx, safeWidth),
-    renderTodosPanel(ctx, safeWidth),
-    renderWorkspacePanel(ctx, safeWidth),
-  ];
-  // Skip empty panels (MCP panel returns [] when no servers)
-  const panels = allPanels.filter(p => p.length > 0);
-
-  const result: string[] = [];
-  for (let i = 0; i < panels.length; i++) {
-    if (i > 0) result.push("");
-    for (const line of panels[i]) {
-      result.push(truncateToWidth(line, safeWidth, "", true));
-    }
-  }
-
-  return result;
+function builtinOnlyRegistry(ctx: SidebarContext): PanelRegistry {
+  const reg = createPanelRegistry();
+  registerBuiltinPanels(reg, () => ctx);
+  return reg;
 }

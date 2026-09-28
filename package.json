@@ -21,7 +21,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --experimental-strip-types --test 'tests/**/*.test.ts'"
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",

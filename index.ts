@@ -1,8 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadSidebarSettings, getAutoCompactEnabled, saveSidebarSettings, MIN_TODOS_MAX, MAX_TODOS_MAX } from "./config.ts";
+import { loadSidebarSettings, getAutoCompactEnabled, saveSidebarSettings, MIN_TODOS_MAX, MAX_TODOS_MAX, type PanelSettings } from "./config.ts";
 import type { TodoItem, SidebarContext, CtxSample } from "./types.ts";
 import { parseTodos, reconstructTodosFromBranch } from "./parse-todos.ts";
-import { renderSidebar } from "./sidebar.ts";
+import { createPanelRegistry } from "./registry.ts";
+import { registerBuiltinPanels } from "./builtins.ts";
+import { installBusWiring, type BusWiring, type NotifyLevel } from "./bus-wiring.ts";
 import { getWorkspaceData, invalidateWorkspaceCache } from "./workspace.ts";
 import { SidebarCompositor } from "./compositor.ts";
 import { getMcpServers, invalidateMcpCache } from "./mcp.ts";
@@ -127,9 +129,18 @@ function refreshCavemanLevel(): void {
   cavemanLevel = resolveCavemanLevel(branch, cavemanCfg);
 }
 
+// ponytail: same-millisecond memo — a single render pass (registry.renderAll)
+// calls buildSidebarContext once per builtin panel; state changes arrive
+// between renders via the coalesced (>=16ms) requestRender, so a same-ms reuse
+// is at most one frame stale. Invalidate-free by design.
+let ctxMemo: { at: number; cwd: string | undefined; ctx: SidebarContext } | null = null;
+
 function buildSidebarContext(cwd: string | undefined): SidebarContext {
+  const now = Date.now();
+  if (ctxMemo && ctxMemo.at === now && ctxMemo.cwd === cwd) return ctxMemo.ctx;
+
   const ws = getWorkspaceData(cwd);
-  return {
+  const ctx: SidebarContext = {
     sessionTitle,
     sessionId: sessionManager?.getSessionId?.() ?? null,
     todos,
@@ -164,6 +175,8 @@ function buildSidebarContext(cwd: string | undefined): SidebarContext {
     lastTurnMs,
     ctxSamples,
   };
+  ctxMemo = { at: now, cwd, ctx };
+  return ctx;
 }
 
 function recordCtxSample(tokens: number): void {
@@ -200,6 +213,41 @@ export default function piSidebar(pi: ExtensionAPI) {
   let tuiRef: any = null;
   let compositorRef: SidebarCompositor | null = null;
 
+  // ── Panel registry + protocol wiring (installed at extension eval time) ──
+  const registry = createPanelRegistry();
+  registerBuiltinPanels(registry, () => buildSidebarContext(currentCwd));
+
+  let notifyUi: ((message: string, level: NotifyLevel) => void) | null = null;
+  const notify = (message: string, level: NotifyLevel): void => {
+    if (notifyUi) notifyUi(message, level);
+    else console.error(`[pi-sidebar-tui] ${message}`);
+  };
+
+  const applyPanelOverrides = (panels: Record<string, PanelSettings> | undefined): void => {
+    if (!panels) return;
+    for (const [id, override] of Object.entries(panels)) registry.setUserOverride(id, override);
+  };
+  applyPanelOverrides(initialSettings.panels);
+
+  const busWiring: BusWiring | null = pi.events
+    ? installBusWiring({
+        events: pi.events,
+        registry,
+        requestRender: () => requestRender?.(),
+        notify,
+      })
+    : null;
+  busWiring?.announceReady();
+
+  const persistSettings = (): void => {
+    saveSidebarSettings({
+      ...loadSidebarSettings(),
+      enabled: sidebarEnabled,
+      width: sidebarWidth,
+      todosMax,
+    });
+  };
+
   const stopCavemanAnim = () => {
     if (cavemanTimer) { clearInterval(cavemanTimer); cavemanTimer = null; }
     cavemanFrame = 0;
@@ -227,13 +275,13 @@ export default function piSidebar(pi: ExtensionAPI) {
 
   const setSidebarEnabled = (enabled: boolean, ctx: any) => {
     sidebarEnabled = enabled;
-    saveSidebarSettings({ enabled: sidebarEnabled, width: sidebarWidth, todosMax });
+    persistSettings();
 
     if (!sidebarEnabled) {
       compositorRef?.dispose();
       compositorRef = null;
     } else if (tuiRef && !compositorRef) {
-      const comp = new SidebarCompositor(tuiRef, () => buildSidebarContext(currentCwd), sidebarWidth);
+      const comp = new SidebarCompositor(tuiRef, () => buildSidebarContext(currentCwd), sidebarWidth, registry);
       comp.install();
       compositorRef = comp;
       requestRender?.();
@@ -247,6 +295,9 @@ export default function piSidebar(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionManager = ctx.sessionManager;
+    notifyUi = (message, level) => ctx.ui.notify(message, level);
+    applyPanelOverrides(loadSidebarSettings().panels);
+    busWiring?.announceReady();
     sessionTitle = ctx.sessionManager.getSessionName() ?? inferSessionTitle(ctx.sessionManager) ?? null;
     // Seed todos from session history so the panel is correct on resume/branch
     // (pi-todo stores a full snapshot in each `todo` tool result's details).
@@ -331,6 +382,7 @@ export default function piSidebar(pi: ExtensionAPI) {
           tui,
           () => buildSidebarContext(currentCwd),
           sidebarWidth,
+          registry,
         );
         comp.install();
         compositorRef = comp;
@@ -566,11 +618,11 @@ export default function piSidebar(pi: ExtensionAPI) {
           return;
         }
         sidebarWidth = n;
-        saveSidebarSettings({ enabled: sidebarEnabled, width: sidebarWidth, todosMax });
+        persistSettings();
         if (compositorRef && tuiRef) {
           compositorRef.dispose();
           compositorRef = null;
-          const comp = new SidebarCompositor(tuiRef, () => buildSidebarContext(currentCwd), sidebarWidth);
+          const comp = new SidebarCompositor(tuiRef, () => buildSidebarContext(currentCwd), sidebarWidth, registry);
           comp.install();
           compositorRef = comp;
           requestRender?.();
@@ -586,9 +638,21 @@ export default function piSidebar(pi: ExtensionAPI) {
           return;
         }
         todosMax = n;
-        saveSidebarSettings({ enabled: sidebarEnabled, width: sidebarWidth, todosMax });
+        persistSettings();
         requestRender?.();
         (ctx as any).ui?.notify?.(`Todos max set to ${n}`, "info");
+        return;
+      }
+
+      if (cmd === "panels") {
+        const rows = registry.list().map((e) => {
+          const source = e.source === "builtin" ? "builtin" : "external";
+          const state = e.enabled ? "on " : "off";
+          const error = e.lastError ? ` err="${e.lastError}"` : "";
+          return `${state} ${e.id}  "${e.title}"  order=${e.order}  source=${source}  fails=${e.failCount}${error}`;
+        });
+        const body = rows.length > 0 ? rows.join("\n") : "no panels registered";
+        ctx.ui?.notify?.(`Panels (${rows.length}):\n${body}`, "info");
         return;
       }
 

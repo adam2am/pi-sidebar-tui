@@ -123,3 +123,43 @@ test("getAutoCompactEnabled updates when project setting changes", () => {
   writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ compaction: { enabled: false } }));
   assert.equal(getAutoCompactEnabled(options), false);
 });
+
+// --- panels overlay -----------------------------------------------------------
+
+test("loadSidebarSettings omits panels when the file has none", () => {
+  const p = tmpFile();
+  writeFileSync(p, JSON.stringify({ enabled: true, width: 45 }));
+  assert.equal("panels" in loadSidebarSettings(p), false);
+});
+
+test("loadSidebarSettings parses valid panel overrides", () => {
+  const p = tmpFile();
+  writeFileSync(p, JSON.stringify({
+    panels: {
+      "pi-sidebar.todos": { enabled: false, order: 5, maxLines: 3 },
+      "ext.panel": { enabled: true },
+    },
+  }));
+  assert.deepEqual(loadSidebarSettings(p).panels, {
+    "pi-sidebar.todos": { enabled: false, order: 5, maxLines: 3 },
+    "ext.panel": { enabled: true },
+  });
+});
+
+test("loadSidebarSettings drops invalid panel fields", () => {
+  const p = tmpFile();
+  writeFileSync(p, JSON.stringify({
+    panels: {
+      "a.panel": { enabled: "yes", order: -4, maxLines: 0 },
+      "b.panel": { order: 7 },
+      "c.panel": 42,
+    },
+  }));
+  assert.deepEqual(loadSidebarSettings(p).panels, { "b.panel": { order: 7 } });
+});
+
+test("saveSidebarSettings round-trips the panels overlay", () => {
+  const p = tmpFile();
+  saveSidebarSettings({ enabled: true, width: 45, todosMax: 10, panels: { "a.b": { order: 3 } } }, p);
+  assert.deepEqual(loadSidebarSettings(p).panels, { "a.b": { order: 3 } });
+});

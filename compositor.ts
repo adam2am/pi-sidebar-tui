@@ -2,6 +2,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SidebarContext } from "./types.ts";
 import { renderSidebar } from "./sidebar.ts";
 import { dim } from "./colors.ts";
+import type { PanelRegistry } from "./registry.ts";
 
 // No background by default so terminal transparency shows through.
 // Set PI_SIDEBAR_BG="#rrggbb" to paint an opaque panel (hides scroll flash).
@@ -40,6 +41,7 @@ export class SidebarCompositor {
   private disposed = false;
 
   private readonly sidebarWidth: number;
+  private readonly registry: PanelRegistry;
 
   // Last painted sidebar content, used to repaint only rows that actually
   // changed. Prevents full-panel rewrites every frame (the flicker source).
@@ -49,12 +51,13 @@ export class SidebarCompositor {
   private cachedWidth = 0;
   private cacheValid = false;
 
-  constructor(tui: any, getCtx: () => SidebarContext, sidebarWidth = 40) {
+  constructor(tui: any, getCtx: () => SidebarContext, sidebarWidth: number, registry: PanelRegistry) {
     this.tui = tui;
     this.terminal = tui.terminal;
     this.getCtx = getCtx;
     this.originalWrite = this.terminal.write.bind(this.terminal);
     this.sidebarWidth = sidebarWidth;
+    this.registry = registry;
   }
 
   install(): void {
@@ -180,7 +183,7 @@ export class SidebarCompositor {
     const sidebarCol = sepCol + 1;
 
     const ctx = this.getCtx();
-    const lines = renderSidebar(ctx, sw);
+    const lines = renderSidebar(ctx, sw, this.registry);
 
     // Build the full set of formatted lines (panel rows + bottom cwd row).
     const home = process.env["HOME"] ?? "";

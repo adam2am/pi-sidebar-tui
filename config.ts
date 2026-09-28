@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { MIN_PANEL_MAX_LINES, MIN_PANEL_ORDER } from "./api.ts";
 
 // Mirrors pi-coding-agent's getAgentDir() ($PI_CODING_AGENT_DIR or ~/.pi/agent).
 // Inlined instead of importing the package so tests never load the full
@@ -14,11 +15,20 @@ function agentDir(): string {
   return join(homedir(), ".pi", "agent");
 }
 
+/** Per-panel user configuration overlay (keys are panel ids). */
+export interface PanelSettings {
+  enabled?: boolean;
+  order?: number;
+  maxLines?: number;
+}
+
 export interface SidebarSettings {
   enabled: boolean;
   width: number;
   /** Max todos shown in the Todos panel before it caps to the last N (+ a "+N more" footer). */
   todosMax: number;
+  /** Optional per-panel overrides applied to the panel registry. */
+  panels?: Record<string, PanelSettings>;
 }
 
 export const DEFAULT_SIDEBAR_SETTINGS: SidebarSettings = { enabled: true, width: 45, todosMax: 10 };
@@ -99,6 +109,28 @@ export function getAutoCompactEnabled(options: AutoCompactReadOptions = {}): boo
   return value;
 }
 
+function readPanels(value: unknown): Record<string, PanelSettings> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+
+  const out: Record<string, PanelSettings> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const fields = raw as Record<string, unknown>;
+    const panel: PanelSettings = {};
+    if (typeof fields["enabled"] === "boolean") panel.enabled = fields["enabled"];
+    const order = fields["order"];
+    if (typeof order === "number" && Number.isFinite(order) && order >= MIN_PANEL_ORDER) {
+      panel.order = order;
+    }
+    const maxLines = fields["maxLines"];
+    if (typeof maxLines === "number" && Number.isInteger(maxLines) && maxLines >= MIN_PANEL_MAX_LINES) {
+      panel.maxLines = maxLines;
+    }
+    if (Object.keys(panel).length > 0) out[id] = panel;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function loadSidebarSettings(path: string = sidebarConfigPath()): SidebarSettings {
   let raw: string;
   try {
@@ -130,6 +162,8 @@ export function loadSidebarSettings(path: string = sidebarConfigPath()): Sidebar
   if (typeof tm === "number" && Number.isInteger(tm) && tm >= MIN_TODOS_MAX && tm <= MAX_TODOS_MAX) {
     settings.todosMax = tm;
   }
+  const panels = readPanels(obj["panels"]);
+  if (panels) settings.panels = panels;
   return settings;
 }
 
