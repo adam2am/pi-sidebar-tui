@@ -657,7 +657,7 @@ export default function piSidebar(pi: ExtensionAPI) {
       }
 
       if (cmd !== "on" && cmd !== "off") {
-        (ctx as any).ui?.notify?.("Usage: /sidebar-tui on | off | width <N> | todos <N>", "warning");
+        (ctx as any).ui?.notify?.("Usage: /sidebar-tui on | off | width <N> | todos <N> | panels", "warning");
         return;
       }
 

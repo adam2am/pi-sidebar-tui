@@ -4,7 +4,7 @@
  * Kept free of pi-runtime imports so it can be driven by a fake EventBus in
  * tests. `index.ts` calls `installBusWiring` once at extension eval time.
  */
-import { CH, PANEL_PROTOCOL, type PanelDescriptor } from "./api.ts";
+import { CH, PANEL_PROTOCOL } from "./api.ts";
 import type { PanelRegistry } from "./registry.ts";
 
 /** Structural match for pi's EventBus (see @earendil-works/pi-coding-agent). */
@@ -39,9 +39,8 @@ export function installBusWiring(deps: BusWiringDeps): BusWiring {
   const { events, registry, requestRender, notify } = deps;
 
   const onRegister = (data: unknown): void => {
-    // Field access happens only after validatePanelDescriptor inside register();
-    // the assertion just satisfies the signature (no `as any`).
-    const outcome = registry.register(data as PanelDescriptor, "external");
+    // The registry is the validation boundary — the transport stays shape-agnostic.
+    const outcome = registry.register(data, "external");
     if (!outcome.ok) {
       notify(`Panel registration rejected: ${outcome.reason}`, "warning");
       return;

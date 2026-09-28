@@ -31,8 +31,8 @@ interface Entry {
 }
 
 export interface PanelRegistry {
-  /** Validate + upsert by id. Never throws. */
-  register(descriptor: PanelDescriptor, source?: PanelSource): RegisterOutcome;
+  /** Validate + upsert by id. Accepts unknown input (bus payloads); never throws. */
+  register(descriptor: unknown, source?: PanelSource): RegisterOutcome;
   /** Remove a panel by id. Returns whether it existed. */
   unregister(id: string): boolean;
   /** Snapshot in effective render order (for the debug listing). */
@@ -103,9 +103,11 @@ export function createPanelRegistry(): PanelRegistry {
   }
 
   return {
-    register(descriptor, source = "external") {
-      const reason = validatePanelDescriptor(descriptor);
+    register(input, source = "external") {
+      const reason = validatePanelDescriptor(input);
       if (reason !== null) return { ok: false, reason };
+      // Validated above — the descriptor contract is guaranteed from here on.
+      const descriptor = input as PanelDescriptor;
 
       const existing = entries.get(descriptor.id);
       if (existing) {
