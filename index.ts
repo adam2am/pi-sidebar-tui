@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadSidebarSettings, getAutoCompactEnabled, saveSidebarSettings, MIN_TODOS_MAX, MAX_TODOS_MAX, type PanelSettings } from "./config.ts";
 import type { TodoItem, SidebarContext, CtxSample } from "./types.ts";
 import { parseTodos, reconstructTodosFromBranch } from "./parse-todos.ts";
-import { createPanelRegistry } from "./registry.ts";
+import { createPanelRegistry, resolvePanelTarget } from "./registry.ts";
 import { registerBuiltinPanels } from "./builtins.ts";
 import { installBusWiring, type BusWiring, type NotifyLevel } from "./bus-wiring.ts";
 import { getWorkspaceData, invalidateWorkspaceCache } from "./workspace.ts";
@@ -246,6 +246,14 @@ export default function piSidebar(pi: ExtensionAPI) {
       width: sidebarWidth,
       todosMax,
     });
+  };
+
+  // Merge-write one panel's override (fold/order/etc.) so it survives restarts.
+  const persistPanelOverride = (id: string, patch: PanelSettings): void => {
+    const settings = loadSidebarSettings();
+    const panels: Record<string, PanelSettings> = { ...settings.panels };
+    panels[id] = { ...panels[id], ...patch };
+    saveSidebarSettings({ ...settings, panels });
   };
 
   const stopCavemanAnim = () => {
@@ -605,7 +613,7 @@ export default function piSidebar(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("sidebar-tui", {
-    description: "Control sidebar: /sidebar-tui on | off | width <N> | todos <N>",
+    description: "Control sidebar: /sidebar-tui on | off | width <N> | todos <N> | panels | fold <target|all|none>",
     handler: async (args, ctx) => {
       currentCwd = (ctx as any).cwd;
       const parts = (args?.trim() ?? "").split(/\s+/);
@@ -648,16 +656,58 @@ export default function piSidebar(pi: ExtensionAPI) {
         const rows = registry.list().map((e) => {
           const source = e.source === "builtin" ? "builtin" : "external";
           const state = e.enabled ? "on " : "off";
+          const folded = e.collapsed ? " folded" : "";
           const error = e.lastError ? ` err="${e.lastError}"` : "";
-          return `${state} ${e.id}  "${e.title}"  order=${e.order}  source=${source}  fails=${e.failCount}${error}`;
+          return `${state} ${e.id}  "${e.title}"  order=${e.order}  source=${source}  fails=${e.failCount}${folded}${error}`;
         });
         const body = rows.length > 0 ? rows.join("\n") : "no panels registered";
         ctx.ui?.notify?.(`Panels (${rows.length}):\n${body}`, "info");
         return;
       }
 
+      if (cmd === "fold") {
+        const target = parts.slice(1).join(" ").trim();
+        const entries = registry.list();
+
+        if (target === "all" || target === "none") {
+          const collapsed = target === "all";
+          const settings = loadSidebarSettings();
+          const panels: Record<string, PanelSettings> = { ...settings.panels };
+          for (const e of entries) {
+            registry.setUserOverride(e.id, { collapsed });
+            panels[e.id] = { ...panels[e.id], collapsed };
+          }
+          saveSidebarSettings({ ...settings, panels });
+          requestRender?.();
+          (ctx as any).ui?.notify?.(collapsed ? "All panels folded" : "All panels unfolded", "info");
+          return;
+        }
+
+        if (target.length === 0) {
+          (ctx as any).ui?.notify?.("Usage: /sidebar-tui fold <panel-id-or-title | all | none>", "warning");
+          return;
+        }
+
+        const resolution = resolvePanelTarget(entries, target);
+        if (!resolution.ok) {
+          const hint = resolution.candidates.length > 0
+            ? `Candidates: ${resolution.candidates.map((c) => c.id).join(", ")}`
+            : "No matching panel.";
+          (ctx as any).ui?.notify?.(`Fold target "${target}": ${hint}`, "warning");
+          return;
+        }
+
+        const entry = resolution.entry;
+        const collapsed = !entry.collapsed;
+        registry.setUserOverride(entry.id, { collapsed });
+        persistPanelOverride(entry.id, { collapsed });
+        requestRender?.();
+        (ctx as any).ui?.notify?.(`${collapsed ? "Folded" : "Unfolded"} ${entry.title} (${entry.id})`, "info");
+        return;
+      }
+
       if (cmd !== "on" && cmd !== "off") {
-        (ctx as any).ui?.notify?.("Usage: /sidebar-tui on | off | width <N> | todos <N> | panels", "warning");
+        (ctx as any).ui?.notify?.("Usage: /sidebar-tui on | off | width <N> | todos <N> | panels | fold <target|all|none>", "warning");
         return;
       }
 
@@ -670,6 +720,31 @@ export default function piSidebar(pi: ExtensionAPI) {
     handler: async (ctx) => {
       currentCwd = (ctx as any).cwd;
       setSidebarEnabled(!sidebarEnabled, ctx);
+    },
+  });
+
+  pi.registerShortcut("ctrl+shift+m", {
+    description: "Fold/unfold a sidebar panel (picker)",
+    handler: async (ctx) => {
+      currentCwd = (ctx as any).cwd;
+      const ui = (ctx as any).ui;
+      if (typeof ui?.select !== "function") {
+        notify("Panel picker unavailable here — use /sidebar-tui fold <panel>", "warning");
+        return;
+      }
+      const entries = registry.list();
+      if (entries.length === 0) return;
+      // Index-mapped labels: duplicate titles can't misresolve.
+      const options = entries.map((e) => `${e.collapsed ? "▸" : "▾"} ${e.title} — ${e.id}`);
+      const picked: string | undefined = await ui.select("Fold/unfold panel", options);
+      if (picked === undefined) return;
+      const entry = entries[options.indexOf(picked)];
+      if (!entry) return;
+      const collapsed = !entry.collapsed;
+      registry.setUserOverride(entry.id, { collapsed });
+      persistPanelOverride(entry.id, { collapsed });
+      requestRender?.();
+      notify(`${collapsed ? "Folded" : "Unfolded"} ${entry.title} (${entry.id})`, "info");
     },
   });
 

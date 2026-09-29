@@ -163,3 +163,26 @@ test("saveSidebarSettings round-trips the panels overlay", () => {
   saveSidebarSettings({ enabled: true, width: 45, todosMax: 10, panels: { "a.b": { order: 3 } } }, p);
   assert.deepEqual(loadSidebarSettings(p).panels, { "a.b": { order: 3 } });
 });
+
+test("loadSidebarSettings parses a collapsed panel override", () => {
+  const p = tmpFile();
+  writeFileSync(p, JSON.stringify({
+    panels: { "pi-sidebar.todos": { collapsed: true } },
+  }));
+  assert.deepEqual(loadSidebarSettings(p).panels, { "pi-sidebar.todos": { collapsed: true } });
+});
+
+test("loadSidebarSettings drops non-boolean collapsed values", () => {
+  const p = tmpFile();
+  writeFileSync(p, JSON.stringify({
+    panels: { "a.panel": { collapsed: "yes" }, "b.panel": { order: 7 } },
+  }));
+  // "a.panel" keeps no valid fields and is dropped entirely
+  assert.deepEqual(loadSidebarSettings(p).panels, { "b.panel": { order: 7 } });
+});
+
+test("saveSidebarSettings round-trips collapsed (fold survives relaunch)", () => {
+  const p = tmpFile();
+  saveSidebarSettings({ enabled: true, width: 45, todosMax: 10, panels: { "a.b": { collapsed: true } } }, p);
+  assert.deepEqual(loadSidebarSettings(p).panels, { "a.b": { collapsed: true } });
+});

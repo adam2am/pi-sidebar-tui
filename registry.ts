@@ -3,6 +3,7 @@
  * truncation helper, which tests already load). Testable in isolation.
  */
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { dim } from "./colors.ts";
 import {
   DEFAULT_PANEL_ORDER,
   validatePanelDescriptor,
@@ -59,6 +60,12 @@ export function createPanelRegistry(): PanelRegistry {
 
   const isSuppressed = (e: Entry): boolean =>
     e.breakerOpen || overrides.get(e.descriptor.id)?.enabled === false;
+
+  // Collapsed panels render as a one-line remnant and their render() is never
+  // called. NOTE for the layer-4 tick scheduler: the visibility predicate is
+  // !isSuppressed(e) && !isCollapsed(e).
+  const isCollapsed = (e: Entry): boolean =>
+    overrides.get(e.descriptor.id)?.collapsed === true;
 
   function orderedEntries(): Entry[] {
     if (ordered) return ordered;
@@ -149,6 +156,7 @@ export function createPanelRegistry(): PanelRegistry {
         order: effectiveOrder(e),
         tickMs: e.descriptor.tickMs,
         enabled: !isSuppressed(e) && !suppressed.has(e.descriptor.id),
+        collapsed: isCollapsed(e),
         source: e.source,
         lastError: e.lastError,
         failCount: e.failCount,
@@ -160,8 +168,12 @@ export function createPanelRegistry(): PanelRegistry {
       const suppressed = suppressedIds();
       const out: string[] = [];
       for (const e of orderedEntries()) {
+        // Suppression (breaker/user-disabled/replaced) removes the panel
+        // entirely; collapse keeps a one-line remnant and skips render work.
         if (isSuppressed(e) || suppressed.has(e.descriptor.id)) continue;
-        const lines = renderEntry(e, frameValue, safeWidth);
+        const lines = isCollapsed(e)
+          ? [dim(` ▸ ${e.descriptor.title}`)]
+          : renderEntry(e, frameValue, safeWidth);
         if (lines.length === 0) continue;
         if (out.length > 0) out.push("");
         for (const line of lines) {
@@ -185,4 +197,31 @@ export function createPanelRegistry(): PanelRegistry {
       return frame;
     },
   };
+}
+
+/** Outcome of resolving a user-typed panel target (id or fuzzy id/title). */
+export type PanelTargetResolution =
+  | { readonly ok: true; readonly entry: PanelEntry }
+  | { readonly ok: false; readonly candidates: readonly PanelEntry[] };
+
+/**
+ * Resolve a `/sidebar-tui fold` target: exact id match first, then
+ * case-insensitive substring on id or title. Exactly one match resolves;
+ * zero or several return the candidates so the caller can list them.
+ */
+export function resolvePanelTarget(
+  entries: readonly PanelEntry[],
+  query: string,
+): PanelTargetResolution {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return { ok: false, candidates: [] };
+  const exact = entries.find((e) => e.id === trimmed);
+  if (exact) return { ok: true, entry: exact };
+  const q = trimmed.toLowerCase();
+  const matches = entries.filter(
+    (e) => e.id.toLowerCase().includes(q) || e.title.toLowerCase().includes(q),
+  );
+  return matches.length === 1
+    ? { ok: true, entry: matches[0] }
+    : { ok: false, candidates: matches };
 }

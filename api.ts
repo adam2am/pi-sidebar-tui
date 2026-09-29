@@ -58,6 +58,8 @@ export interface PanelUserOverride {
   readonly enabled?: boolean;
   readonly order?: number;
   readonly maxLines?: number;
+  /** Folded panels render as a one-line remnant and their render() is never called. */
+  readonly collapsed?: boolean;
 }
 
 /** Immutable snapshot of a registered panel, for the debug listing. */
@@ -69,6 +71,8 @@ export interface PanelEntry {
   readonly tickMs?: number;
   /** False when user-disabled, breaker-tripped, or superseded by `replaces`. */
   readonly enabled: boolean;
+  /** True when folded by the user; the panel renders as a one-line remnant. */
+  readonly collapsed: boolean;
   readonly source: PanelSource;
   readonly lastError: string | null;
   readonly failCount: number;

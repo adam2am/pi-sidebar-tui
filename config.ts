@@ -20,6 +20,8 @@ export interface PanelSettings {
   enabled?: boolean;
   order?: number;
   maxLines?: number;
+  /** Folded panels render as a one-line remnant. Persisted across launches. */
+  collapsed?: boolean;
 }
 
 export interface SidebarSettings {
@@ -118,6 +120,7 @@ function readPanels(value: unknown): Record<string, PanelSettings> | undefined {
     const fields = raw as Record<string, unknown>;
     const panel: PanelSettings = {};
     if (typeof fields["enabled"] === "boolean") panel.enabled = fields["enabled"];
+    if (typeof fields["collapsed"] === "boolean") panel.collapsed = fields["collapsed"];
     const order = fields["order"];
     if (typeof order === "number" && Number.isFinite(order) && order >= MIN_PANEL_ORDER) {
       panel.order = order;

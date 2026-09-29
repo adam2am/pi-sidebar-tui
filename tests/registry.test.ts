@@ -5,7 +5,7 @@ import {
   validatePanelDescriptor,
   type PanelDescriptor,
 } from "../api.ts";
-import { createPanelRegistry } from "../registry.ts";
+import { createPanelRegistry, resolvePanelTarget } from "../registry.ts";
 
 function make(over: Partial<PanelDescriptor> = {}): PanelDescriptor {
   return {
@@ -301,4 +301,106 @@ test("userOverride: applies to a panel registered after the override", () => {
   reg.register(make({ id: "a", order: 10, render: () => ["A"] }));
   assert.deepEqual(plain(reg.renderAll(40, 0)), []);
   assert.equal(reg.list()[0]!.order, 5);
+});
+
+// ─── folding ─────────────────────────────────────────────────────────────────
+
+test("fold: collapsed panel renders a remnant and never calls render", () => {
+  const reg = createPanelRegistry();
+  let calls = 0;
+  reg.register(make({ render: () => { calls += 1; return ["line"]; } }));
+  reg.setUserOverride("test.panel", { collapsed: true });
+  assert.deepEqual(plain(reg.renderAll(40, 0)), [" ▸ Panel"]);
+  assert.equal(calls, 0);
+});
+
+test("fold: remnant row is width-clamped", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ title: "A Very Long Panel Title" }));
+  reg.setUserOverride("test.panel", { collapsed: true });
+  const out = plain(reg.renderAll(6, 0));
+  assert.equal(out.length, 1);
+  assert.ok(out[0]!.length <= 6);
+});
+
+test("fold: collapsed panel keeps separator joining between siblings", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ id: "a.one", title: "A", order: 10, render: () => ["A-line"] }));
+  reg.register(make({ id: "b.two", title: "B", order: 20 }));
+  reg.register(make({ id: "c.three", title: "C", order: 30, render: () => ["C-line"] }));
+  reg.setUserOverride("b.two", { collapsed: true });
+  assert.deepEqual(plain(reg.renderAll(40, 0)), ["A-line", "", " ▸ B", "", "C-line"]);
+});
+
+test("fold: survives re-register (upsert never touches overrides)", () => {
+  const reg = createPanelRegistry();
+  reg.register(make());
+  reg.setUserOverride("test.panel", { collapsed: true });
+  reg.register(make()); // same id, e.g. extension reload
+  assert.equal(reg.list()[0]!.collapsed, true);
+  assert.deepEqual(plain(reg.renderAll(40, 0)), [" ▸ Panel"]);
+});
+
+test("fold: collapsed throwing panel never trips the breaker; uncollapse restores it", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ render: () => { throw new Error("boom"); } }));
+  reg.setUserOverride("test.panel", { collapsed: true });
+  for (let i = 0; i < 5; i++) reg.renderAll(40, 0);
+  assert.equal(reg.list()[0]!.failCount, 0); // render never invoked while collapsed
+  assert.deepEqual(plain(reg.renderAll(40, 0)), [" ▸ Panel"]);
+
+  reg.setUserOverride("test.panel", { collapsed: false });
+  for (let i = 0; i < 3; i++) reg.renderAll(40, 0); // breaker trips at exactly 3
+  assert.equal(reg.list()[0]!.failCount, 3);
+  assert.deepEqual(reg.renderAll(40, 0), []); // suppressed entirely: no remnant
+});
+
+test("fold: disabled + collapsed renders nothing (suppression precedence)", () => {
+  const reg = createPanelRegistry();
+  reg.register(make());
+  reg.setUserOverride("test.panel", { enabled: false, collapsed: true });
+  assert.deepEqual(reg.renderAll(40, 0), []);
+});
+
+test("fold: list() exposes collapsed state", () => {
+  const reg = createPanelRegistry();
+  reg.register(make());
+  assert.equal(reg.list()[0]!.collapsed, false);
+  reg.setUserOverride("test.panel", { collapsed: true });
+  assert.equal(reg.list()[0]!.collapsed, true);
+});
+
+// ─── resolvePanelTarget ─────────────────────────────────────────────────────
+
+test("resolvePanelTarget: exact id wins over substring matches", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ id: "pi-sidebar.todos", title: "Todos" }));
+  reg.register(make({ id: "pi-sidebar.todos-extra", title: "More Todos" }));
+  const r = resolvePanelTarget(reg.list(), "pi-sidebar.todos");
+  assert.ok(r.ok && r.entry.id === "pi-sidebar.todos");
+});
+
+test("resolvePanelTarget: case-insensitive substring on id or title", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ id: "pi-sidebar.todos", title: "Todos" }));
+  assert.ok(resolvePanelTarget(reg.list(), "todos").ok);
+  assert.ok(resolvePanelTarget(reg.list(), "TODOS").ok);
+  assert.ok(resolvePanelTarget(reg.list(), "sidebar.tod").ok);
+});
+
+test("resolvePanelTarget: ambiguous returns candidates, unknown returns none", () => {
+  const reg = createPanelRegistry();
+  reg.register(make({ id: "a.todos", title: "Todos A" }));
+  reg.register(make({ id: "b.todos", title: "Todos B" }));
+  const ambiguous = resolvePanelTarget(reg.list(), "todos");
+  assert.ok(!ambiguous.ok && ambiguous.candidates.length === 2);
+  const unknown = resolvePanelTarget(reg.list(), "nope");
+  assert.ok(!unknown.ok && unknown.candidates.length === 0);
+});
+
+test("resolvePanelTarget: empty query resolves nothing", () => {
+  const reg = createPanelRegistry();
+  reg.register(make());
+  const r = resolvePanelTarget(reg.list(), "   ");
+  assert.ok(!r.ok && r.candidates.length === 0);
 });
